@@ -1,0 +1,397 @@
+<!--
+	Acolhe Brasil: aplicação que identifica as comunidades terapêuticas que acolhem pessoas
+	com transtornos decorrentes do uso, abuso ou dependência de substâncias psicoativas.
+	
+    Copyright (C) 2013	Ronaldo Agra <jose-ronaldo.souza@serpro.gov.br>
+    					Viviane Malheiros <viviane.malheiros@serpro.gov.br>
+    					Andre Menezes <andre.menezes@serpro.gov.br>
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ -->
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no">
+    <meta charset="utf-8">
+    <title>Acolhe Brasil</title>
+    <style>
+		html, body, #map-canvas {
+        	height: 100%;
+       		margin: 0px;
+        	padding: 0px
+		}
+
+		#painelEndereco {
+		opacity:0.8;
+		filter:alpha(opacity=80); /* For IE8 and earlier */
+        	position: absolute;
+			width: 29%;
+        	top: 0;
+        	left: 15%;
+        	z-index: 5;
+        	background-color: #133c7c;
+        	color: #fff;
+        	padding: 15px;
+			border: 1px solid #4d4d4d;
+			border-top-left-radius:0;
+			border-bottom-left-radius:5px;
+			border-top-right-radius:0;
+			border-bottom-right-radius:5px;
+		}
+		#painelEndereco h1	{font-family:verdana,arial,sans-serif;text-transform:uppercase;text-align:center;font-size:0.9001em;margin-top:0;}
+		#painelEndereco p	{font-family:helvetica,arial,sans-serif;font-size:0.78em;margin:8px 5px;}
+
+		#painelFiltros {
+			opacity:0.8;
+			filter:alpha(opacity=80); /* For IE8 and earlier */
+			position: absolute;
+			width: 20%;
+        	top: 200px;
+        	right:0;
+        	z-index: 5;
+        	background-color: #133c7c;
+        	padding: 15px;
+			border: 1px solid #999;
+			vertical-align: middle;
+			border-top-left-radius:5px;
+			border-bottom-left-radius:5px;
+			border-top-right-radius:0;
+			border-bottom-right-radius:0;
+			font-family:arial,sans-serif;
+			font-size:0.8em;
+			color:#fff;
+		}
+		
+		input[type='checkbox']	{margin-right:5px;text-align:abs-bottom;}
+		label	{padding-right:5px;}
+		.info	{border-radius:20px;color:#4d4d4d;}
+		.info h3	{color:#123975;}
+		.info em	{color:#1c8651;}
+		div.info ul{padding-left:0;}
+		div.info ul li{padding:2px 0;}
+		#painelFiltros fieldset	{padding:5px;}
+		#painelFiltros legend	{padding:5px;}
+		
+		#checksIdade, #checksGenero {border: 1px solid #999;margin-top:10px;}
+
+    </style>
+	<script type="text/javascript" charset="utf-8" src="js/markerclusterer.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?v=3.exp&sensor=true&libraries=places"></script>
+
+	<script type="text/javascript" charset="utf-8" src="js/comunidades.js"></script>
+
+    <script>
+		var geocoder;
+		var map;
+		var meuMarcador;
+		var marcadores = [];
+		var divLugares;
+		var infowindow;
+		var latUsuario;
+		var lngUsuario;
+		var markerCluster;
+		
+		// constantes 
+		var PUBLICO_ALVO_CRIANCA_ADOLESCENTE = 'CA';
+		var PUBLICO_ALVO_ADULTO_IDOSO = 'AI';
+		var PUBLICO_ALVO_TODOS = 'CAAI';
+		
+		var GENERO_FEMININO = 'F';
+		var GENERO_MASCULINO = 'M';
+		var GENERO_TODOS = 'A';
+
+		function initialize() {
+			// limpa os campos de entrada de texto
+			resetInputs();
+
+			// inicializa o Google Maps
+			geocoder = new google.maps.Geocoder();
+			var latlng = new google.maps.LatLng(-15.753, -47.929);
+			var mapOptions = {
+				zoom: 12,
+				center: latlng
+			}
+
+			// cria o mapa
+			map = new google.maps.Map(document.getElementById('map-canvas'), mapOptions);
+
+			meuMarcador = criarMarcador(latlng, 'Sua localização', undefined, '');
+
+			var autocomplete = new google.maps.places.Autocomplete(document.getElementById('txtEndereco'));
+			autocomplete.bindTo('bounds', map);
+
+			// configura o autocomplete de busca da google
+			google.maps.event.addListener(autocomplete, 'place_changed', function() {
+				var local = autocomplete.getPlace();
+				if (!local.geometry) {
+					return;
+				}
+				atualizaPosicaoMarcador(local);
+			});
+
+			// identifica se o browser tem suporte à geolocalização
+			if (navigator.geolocation) {
+				navigator.geolocation.getCurrentPosition(sucessoGeolocationBrowser, erroGeolocationBrowser);
+			}
+
+			// carrega as comunidades
+			carregarComunidades();
+		}
+
+		// atualiza a posição marcador no mapa
+		function atualizaPosicaoMarcador(local) {
+			meuMarcador.setVisible(false);
+
+			// If the place has a geometry, then present it on a map.
+			if (local.geometry.viewport) {
+				map.fitBounds(local.geometry.viewport);
+			} else {
+				map.setCenter(local.geometry.location);
+				map.setZoom(12);
+			}
+			meuMarcador.setPosition(local.geometry.location);
+			meuMarcador.setVisible(true);
+		}
+
+		// limpa os campos de entrada de texto
+		function resetInputs() {
+			document.getElementById('txtEndereco').value = '';
+		}
+
+		// recupera a posição (lat/long) do usuário
+		function sucessoGeolocationBrowser(position) {
+			latUsuario = position.coords.latitude;
+			lngUsuario = position.coords.longitude;
+			ondeEstou();
+		}
+
+		// função de erro da recuperação da localização do usuário
+		function erroGeolocationBrowser(){
+			alert('Não foi possível recuperar sua localização.\n' + 'Por favor, verifique se o browser permite que sua localização seja identificada.');
+		}
+
+		// centraliza a localização do usuário no mapa
+		function ondeEstou() {
+			removeMarcadores(true);
+
+			var latlng = new google.maps.LatLng(latUsuario, lngUsuario);
+			map.setCenter(latlng);
+			meuMarcador = criarMarcador(latlng, 'Sua localização', undefined, '');
+		}
+
+		function geocodificarEndereco() {
+			removeMarcadores(true);
+
+			var txtEndereco = document.getElementById('txtEndereco').value;
+			geocoder.geocode( { 'address': txtEndereco}, function(results, status) {
+				if (status == google.maps.GeocoderStatus.OK) {
+					map.setCenter(results[0].geometry.location);
+
+					meuMarcador = criarMarcador(results[0].geometry.location, 'Posição do endereço ' + txtEndereco, undefined, '');
+
+					latUsuario = results[0].geometry.location.lat();
+					lngUsuario = results[0].geometry.location.lng();
+				} else {
+					alert('Não foi possível localizar o endereço. Motivo: ' + status);
+				}
+		  	});
+		}
+
+		// adiciona um marcador no mapa
+		function criarMarcador(localizacao, titulo, icone, conteudoPopup) {
+			var marcador = new google.maps.Marker({
+				map: map,
+				position: localizacao,
+				title: titulo,
+				icon: icone
+		  	});
+
+			google.maps.event.addListener(marcador, 'click', function() {
+				if (infowindow) {
+					infowindow.close();
+				}
+				
+				infowindow = new google.maps.InfoWindow({
+					content: conteudoPopup
+				});
+				infowindow.open(map,marcador);
+			});
+
+			return marcador;
+		}
+
+		// remove todos os marcadores do mapa
+		function removeMarcadores(ehMinhaPosicao) {
+			if(meuMarcador != undefined && ehMinhaPosicao) {
+				meuMarcador.setMap(null);
+			}
+
+			// desvincula os marcadores do mapa
+			for (var i = 0; i < marcadores.length; i++) {
+				marcadores[i].setMap(null);
+			}
+
+			// reset do array de marcadores
+			marcadores = [];
+		}
+
+		// geocodifica os comunidades
+		function carregarComunidades() {
+			removeMarcadores(false);
+
+			var comunidade;
+			var posComunidade;
+
+			for (var i = 0; i < comunidades.length; i++) {
+				comunidade = comunidades[i];
+
+				posComunidade = new google.maps.LatLng(comunidade.lat, comunidade.lng);
+				marcadores.push(criarMarcador(posComunidade, comunidade.nome, getIconeMarcador(comunidade), getConteudoPopupComunidade(comunidade)));
+			}
+
+			markerCluster = new MarkerClusterer(map, marcadores);
+		}
+
+		// recupera a imagem do marcador de acordo com o publico atendido
+		function getIconeMarcador(comunidade) {
+			var iconeMarcador = 'marcador_unisex.png';
+
+			if(comunidade.sexo == GENERO_FEMININO) {
+				iconeMarcador = 'marcador_feminino.png';
+			} else if(comunidade.sexo == GENERO_MASCULINO) {
+				iconeMarcador = 'marcador_masculino.png';
+			}
+
+			return iconeMarcador;
+		}
+
+		// monta a string que será apresentada no popup do marcador que representa a comunidade
+		function getConteudoPopupComunidade(comunidade) {
+			return '<div class="info">' +
+						'<h3>' + comunidade.nome + '</h3>' +
+						'<ul><li>' + comunidade.endereco + '</li>' +
+						'<li>' + comunidade.fone + '</li>' +
+						'<li><strong>Contato: </strong><a href=\"mailto:' + comunidade.email + '\">' + comunidade.email + '</a></li>' +
+						'<li><strong>Público alvo: </strong>' + comunidade.publico + '<em>' + comunidade.publicoEspec + '</em></li>' +
+						'<li><strong>Internação: </strong>' + comunidade.internacao +'</li></ul>' +
+					'</div>';
+		}
+
+		function filtrarComunidades() {
+			// limpa os marcadores do mapa
+			markerCluster.clearMarkers();
+			removeMarcadores(false);
+			
+			var comunidade;
+			var posComunidade;
+			var genero = getGeneroSelecionado();
+			var publicoAlvo = getPublicoAlvoSelecionado();
+			
+			// varre todo o array das comunidades e apresenta no mapa apenas aquelas que atendem ao filtro 
+			for (var i = 0; i < comunidades.length; i++) {
+				comunidade = comunidades[i];
+	
+				if(	(publicoAlvo == PUBLICO_ALVO_TODOS && genero == GENERO_TODOS)					||
+					(publicoAlvo == PUBLICO_ALVO_TODOS && (comunidade.sexo == genero || comunidade.sexo == GENERO_TODOS))				||
+					(genero == GENERO_TODOS && (publicoAlvo == PUBLICO_ALVO_TODOS || ehPublicoAlvo(comunidade.publico, publicoAlvo))		||
+					(publicoAlvo == PUBLICO_ALVO_TODOS || ehPublicoAlvo(comunidade.publico, publicoAlvo)) && (comunidade.sexo == genero || comunidade.sexo == GENERO_TODOS)))
+				{
+					posComunidade = new google.maps.LatLng(comunidade.lat, comunidade.lng);
+					marcadores.push(criarMarcador(posComunidade, comunidade.nome, getIconeMarcador(comunidade), getConteudoPopupComunidade(comunidade)));
+				}
+			}
+			
+			markerCluster.addMarkers(marcadores);
+		}
+		
+		// recupera o genero selecionado no filtro 
+		function getGeneroSelecionado() {
+			var masculino = document.getElementById('generoM');
+			var feminino = document.getElementById('generoF');
+
+			// identifica qual o genero desejado 
+			if((masculino.checked && feminino.checked) || (!masculino.checked && !feminino.checked)) {
+				return GENERO_TODOS;
+			} else if(masculino.checked) {
+				return GENERO_MASCULINO;
+			} else {
+				//feminino.checked 
+				return GENERO_FEMININO;
+			}
+		}
+		
+		// recupera o público alvo selecionado no filtro 
+		function getPublicoAlvoSelecionado() {
+			var criancaAdolescente = document.getElementById('idadeCA');
+			var adultoIdoso = document.getElementById('idadeAI');
+
+			// identifica qual a faixa etaria desejada 
+			if((criancaAdolescente.checked && adultoIdoso.checked) || (!criancaAdolescente.checked && !adultoIdoso.checked)) {
+				return PUBLICO_ALVO_TODOS;
+			} else if(criancaAdolescente.checked) {
+				return PUBLICO_ALVO_CRIANCA_ADOLESCENTE;
+			} else {
+				//adultoIdoso.checked 
+				return PUBLICO_ALVO_ADULTO_IDOSO;
+			}
+		}
+		
+		// verifica se o publico alvo da comunidade atende aos critérios do filtro
+		function ehPublicoAlvo(publicoComunidade, publicoAlvo) {
+			var padrao;
+
+			if(publicoAlvo == PUBLICO_ALVO_CRIANCA_ADOLESCENTE) {
+				padrao = /(crian)|(adolesc)/gi;
+			} else {
+				// publicoAlvo == PUBLICO_ALVO_ADULTO_IDOSO 
+				padrao = /(adulto)|(idoso)/gi;
+			}
+
+			return padrao.exec(publicoComunidade);
+		}
+
+		google.maps.event.addDomListener(window, 'load', initialize);
+    </script>
+
+  </head>
+  <body>
+		<!-- PAINEL ENDEREÇO -->
+		<div id="painelEndereco" style="align: center;">
+			<h1>Acolhe Brasil - Comunidades Terapêuticas</h1>
+			<p align="center">Encontre as comunidades terapêuticas que acolhem pessoas com transtornos decorrentes do uso, abuso ou dependência de substâncias psicoativas.</p>
+			<input id="txtEndereco" type="text" placeholder="Informe o endereço ou CEP" style="height: 100%; width: 98%;">
+		</div>
+
+		<!-- MAPA -->
+		<div id="map-canvas"></div>
+
+		<!-- PAINEL FILTROS -->
+		<div id="painelFiltros">
+			<strong>Filtrar por:</strong>
+			<!-- CHECKBOXES PUBLICO ALVO -->
+			<fieldset id="checksIdade">
+				<legend>Público alvo:</legend>
+				<input type="checkbox" name="idadeCA" id="idadeCA" onchange="filtrarComunidades();"><label>Criança / Adolescente</label>
+				<input type="checkbox" name="idadeAI" id="idadeAI" onchange="filtrarComunidades();"><label>Adulto / Idoso</label>
+			</fieldset>
+
+			<!-- CHECKBOXES GENERO DO PUBLICO ALVO -->
+			<fieldset id="checksGenero">
+				<legend>Gênero do público alvo:</legend>
+				<input type="checkbox" name="generoF" id="generoF" onchange="filtrarComunidades();"><label>Feminino</label>
+				<input type="checkbox" name="generoM" id="generoM" onchange="filtrarComunidades();"><label>Masculino</label>
+			</fieldset>
+		</div>
+  </body>
+</html>
